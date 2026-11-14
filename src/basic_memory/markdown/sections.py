@@ -221,7 +221,7 @@ def scan_sections(body: str) -> tuple[MarkdownSection, ...]:
 # Heuristic token budget: the repo carries no tokenizer dependency, so max_tokens
 # is charged in characters at ~4 chars/token (the common English-plus-markdown
 # approximation).
-_CHARS_PER_TOKEN = 4
+CHARS_PER_TOKEN = 4
 
 # The explicit truncation marker: appended as a final line, excluded from the
 # budget, and naming the exact document-absolute line to resume reading from.
@@ -679,7 +679,7 @@ def slice_note_content(
     truncated = False
     continue_line: int | None = None
     if max_tokens is not None:
-        kept = _token_budget_line_count(content, selected, max_tokens * _CHARS_PER_TOKEN)
+        kept = _token_budget_line_count(content, selected, max_tokens * CHARS_PER_TOKEN)
         if kept is not None:
             continue_line = start_line + kept
             end_line = start_line + kept - 1

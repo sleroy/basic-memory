@@ -26,6 +26,8 @@ V1_TOOLS = {
     "bm_project_list",
     "bm_project_create",
     "bm_recent",
+    "bm_facts",
+    "bm_project_context",
 }
 # Pre-1.0 tool names; none may be callable on the 1.0 server.
 RETIRED_TOOLS = frozenset(

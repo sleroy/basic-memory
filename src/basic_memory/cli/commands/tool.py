@@ -678,6 +678,98 @@ def recent(
     )
 
 
+@tool_app.command("facts")
+def facts(
+    kind: Annotated[
+        str,
+        typer.Argument(help="fact, bug, lesson, best_practice, decision or glossary_term"),
+    ],
+    repo: Annotated[
+        Optional[str], typer.Option(help="Only notes about this code repository")
+    ] = None,
+    status: Annotated[
+        Optional[str], typer.Option(help="Only this status, e.g. draft; omit for all")
+    ] = None,
+    filters: Annotated[
+        Optional[str], typer.Option(help="Frontmatter filters as a JSON object")
+    ] = None,
+    page: PageOption = 1,
+    page_size: Annotated[int, typer.Option(help="Results per page (1-100)")] = 20,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """List curated knowledge notes of one kind (bm_facts).
+
+    Examples:
+
+    bm tool facts lesson --repo monolith-breaker
+    bm tool facts decision --repo monolith-breaker --status draft
+    """
+    from basic_memory.mcp.tools import bm_facts
+
+    run_tool(
+        bm_facts,
+        kind=kind,
+        repo=repo,
+        status=status,
+        filters=filters,
+        page=page,
+        page_size=page_size,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
+@tool_app.command("project-context")
+def project_context(
+    repo: Annotated[str, typer.Option(help="The code repository the notes are about")],
+    task: Annotated[Optional[str], typer.Option(help="What the session will do")] = None,
+    affected_paths: Annotated[
+        Optional[list[str]], typer.Option(help="Repository path the work touches (repeatable)")
+    ] = None,
+    branch: Annotated[Optional[str], typer.Option(help="Current branch")] = None,
+    budget_tokens: Annotated[
+        Optional[int], typer.Option(help="Approximate pack size in tokens (500-20000)")
+    ] = None,
+    recheck_days: Annotated[
+        Optional[int], typer.Option(help="Days after which a note counts as unverified")
+    ] = None,
+    project: ProjectOption = None,
+    json_output: JsonOption = False,
+    local: LocalOption = False,
+    cloud: CloudOption = False,
+) -> None:
+    """Print the session-start context pack for a repository (bm_project_context).
+
+    The pack is plain text, so a shell hook can inject it into a session.
+
+    Examples:
+
+    bm tool project-context --repo monolith-breaker --branch dev
+    bm tool project-context --repo monolith-breaker --task "fix retry logic" \\
+        --affected-paths src/retry
+    """
+    from basic_memory.mcp.tools import bm_project_context
+
+    run_tool(
+        bm_project_context,
+        repo=repo,
+        task=task,
+        affected_paths=affected_paths,
+        branch=branch,
+        budget_tokens=budget_tokens,
+        recheck_days=recheck_days,
+        project=project,
+        json_output=json_output,
+        local=local,
+        cloud=cloud,
+    )
+
+
 @tool_app.command("schema-validate")
 def schema_validate(
     note_type: Annotated[Optional[str], typer.Option(help="The note type to check")] = None,
