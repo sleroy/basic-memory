@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from basic_memory.markdown.sections import CHARS_PER_TOKEN
-from basic_memory.mcp.memory_records import MemoryRecord, one_line
+from basic_memory.mcp.memory_records import FactStatus, MemoryRecord, one_line
 
 # --- Vocabulary ---
 
@@ -39,7 +39,7 @@ KIND_HEADINGS: dict[str, str] = {
 
 # Only these lifecycle states are ever shown. Drafts await review; superseded and
 # invalidated notes stopped being true.
-RENDERABLE_STATUSES = frozenset({"active", "fixed"})
+RENDERABLE_STATUSES: frozenset[FactStatus] = frozenset({"active", "fixed"})
 
 MAX_BUDGET_TOKENS = 20000
 
@@ -56,6 +56,7 @@ CODE_POINTER_TEXT = (
 )
 HYGIENE_LABEL = "HYGIENE:"
 EMPTY_SECTION = "(none)"
+OVER_BUDGET_NOTE = "the header and hygiene lines alone exceed it, so no section is shown"
 
 
 # --- Tokens ---
@@ -139,6 +140,7 @@ class PackRequest:
     budget_tokens: int
     recheck_days: int
     generated_at: datetime
+    task: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,16 +235,62 @@ def _timestamp(moment: datetime) -> str:
 # --- Lines ---
 
 
-def _call(tool: str, **arguments: object) -> str:
-    """A tool call as the model should write it, e.g. `bm_facts(kind="lesson", project="p")`."""
-    rendered = ", ".join(
+def _arguments(**arguments: object) -> str:
+    return ", ".join(
         f"{name}={json.dumps(value, ensure_ascii=False)}" for name, value in arguments.items()
     )
-    return f"{tool}({rendered})"
+
+
+def _call(tool: str, **arguments: object) -> str:
+    """A tool call as the model should write it, e.g. `bm_facts(kind="lesson", project="p")`."""
+    return f"{tool}({_arguments(**arguments)})"
 
 
 def _continue_with(call: str) -> str:
     return f"… continue with {call}"
+
+
+def _policy_continuation(request: PackRequest) -> str:
+    """How to get the policy pointers the budget cut.
+
+    A larger budget returns the same pack with more room, so the call carries the
+    arguments that shaped this one. At the maximum budget there is nothing larger to
+    ask for; the pointers come from the notes, which `bm_facts` lists per kind.
+    """
+    scope = {"project": request.project, "repo": request.repo}
+    if request.budget_tokens >= MAX_BUDGET_TOKENS:
+        example = _call("bm_facts", kind="decision", status="active", **scope)
+        return (
+            "… budget_tokens is at its maximum; the pointers come from the notes, so list "
+            f"them with one bm_facts call per kind, e.g. {example}"
+        )
+    carried: dict[str, object] = {}
+    if request.branch is not None:
+        carried["branch"] = request.branch
+    if request.task is not None:
+        carried["task"] = request.task
+    if request.affected_paths:
+        carried["affected_paths"] = list(request.affected_paths)
+    widened = min(request.budget_tokens * 2, MAX_BUDGET_TOKENS)
+    return _continue_with(_call("bm_project_context", **scope, **carried, budget_tokens=widened))
+
+
+def _kind_continuation(kind: str, request: PackRequest) -> str:
+    """The call that lists a kind's notes, scoped to the statuses the pack draws from.
+
+    `bm_facts` starts at the first note, so the list repeats the notes shown above, and
+    it has no branch filter, so a pack built for a branch says which notes to skip.
+    """
+    status_scope: dict[str, object] = (
+        {"filters": {"status": {"$in": sorted(RENDERABLE_STATUSES)}}}
+        if kind == "bug"
+        else {"status": "active"}
+    )
+    call = _call("bm_facts", kind=kind, **status_scope, project=request.project, repo=request.repo)
+    note = "full list; includes notes shown above"
+    if request.branch is not None:
+        note += f"; skip valid_for.branch other than {json.dumps(request.branch)}"
+    return f"{_continue_with(call)} ({note})"
 
 
 def item_line(record: MemoryRecord) -> str:
@@ -294,7 +342,8 @@ def _fill(groups: Sequence[_Group], available: int) -> list[Block]:
     call. Once the budget cuts a group, every later group shows only its heading and
     continuation: the pack is a prefix of the priority order, so a low-priority note
     never appears while a higher one is missing. Each later group keeps room for that
-    heading and continuation.
+    heading and continuation, and a group whose heading and continuation no longer fit
+    is left out whole, so the pack never exceeds `available`.
     """
     live = [group for group in groups if group.lines or group.more_upstream]
     blocks: dict[str, Block] = {
@@ -327,6 +376,14 @@ def _fill(groups: Sequence[_Group], available: int) -> list[Block]:
         spent = heading_cost + sum(_line_cost(line) for line in kept)
         if cut:
             spent += continuation_cost
+        # Trigger: not even the heading and continuation fit in what is left.
+        # Why: earlier groups' long lines (or long names repeated in every
+        #      continuation) can use the budget up; emitting anyway overruns it.
+        # Outcome: the group stays empty and is not rendered; later groups cannot fit
+        #          either, so they are left out the same way.
+        if spent > remaining:
+            exhausted = True
+            continue
         remaining -= spent
         blocks[group.name] = Block(
             group.name, group.heading, tuple(kept), group.continuation if cut else None
@@ -364,19 +421,21 @@ def _render(
         f"generated: {_timestamp(request.generated_at)} | "
         f"tokens: {tokens_used}/{request.budget_tokens} (estimate, chars/{CHARS_PER_TOKEN})"
     )
+    if tokens_used > request.budget_tokens:
+        # The header, labels and hygiene lines are never cut; only long names can push
+        # them past the smallest budget, and then no section has room.
+        header += f" | over budget: {OVER_BUDGET_NOTE}"
     lines = [header, ""]
     lines += _section(POLICY_LABEL, [policy])
     lines += _section(RECALLED_LABEL, recalled)
     lines += _section(EPISODIC_LABEL, [episodic])
     if request.affected_paths:
         lines += [CODE_POINTER_LABEL, CODE_POINTER_TEXT, ""]
-    triage = _call(
-        "bm_facts", kind="<kind>", status="draft", project=request.project, repo=request.repo
-    )
+    triage = _arguments(status="draft", project=request.project, repo=request.repo)
     cutoff = stale_cutoff(request.generated_at, request.recheck_days)
     lines += [
         HYGIENE_LABEL,
-        f"- {drafts} drafts awaiting review ({triage})",
+        f"- {drafts} drafts awaiting review (one bm_facts call per kind, with {triage})",
         f"- {stale} active notes not verified in {request.recheck_days} days "
         f"(last_verified absent or before {cutoff})",
     ]
@@ -388,20 +447,15 @@ def compose_pack(request: PackRequest, data: PackData) -> ContextPack:
 
     The header, labels, code pointer and hygiene lines are always shown; the rest of the
     budget is filled with policy pointers, then recalled knowledge, then recent sessions.
+    When names are so long that the always-shown lines alone exceed the budget, no
+    section is shown and the header says so.
     """
-    scope = {"project": request.project, "repo": request.repo}
     groups = [
         _Group(
             "policy",
             None,
             policy_lines(data.kinds),
-            _continue_with(
-                _call(
-                    "bm_project_context",
-                    **scope,
-                    budget_tokens=min(request.budget_tokens * 2, MAX_BUDGET_TOKENS),
-                )
-            ),
+            _policy_continuation(request),
             False,
         ),
         *(
@@ -409,7 +463,7 @@ def compose_pack(request: PackRequest, data: PackData) -> ContextPack:
                 notes.kind,
                 KIND_HEADINGS[notes.kind],
                 tuple(item_line(record) for record in notes.records),
-                _continue_with(_call("bm_facts", kind=notes.kind, **scope)),
+                _kind_continuation(notes.kind, request),
                 notes.more_upstream,
             )
             for notes in data.kinds
@@ -440,6 +494,10 @@ def compose_pack(request: PackRequest, data: PackData) -> ContextPack:
         request, request.budget_tokens, policy, recalled, episodic, data.drafts, data.stale
     )
     tokens_used = sum(_line_cost(line) for line in lines)
+    if tokens_used > request.budget_tokens:
+        # Only the frame itself can overrun, and the header then says so; count that.
+        lines = _render(request, tokens_used, policy, recalled, episodic, data.drafts, data.stale)
+        tokens_used = sum(_line_cost(line) for line in lines)
     return ContextPack(
         request, policy, tuple(recalled), episodic, data.drafts, data.stale, tokens_used
     )

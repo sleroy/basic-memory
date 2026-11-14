@@ -10,6 +10,7 @@ import pytest
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError, validate_call
 
+from basic_memory.mcp.memory_records import FACT_STATUSES
 from basic_memory.mcp.tools import bm_facts, bm_write
 
 REPO = "demo-repo"
@@ -64,7 +65,7 @@ async def test_lists_one_kind_with_lifecycle_fields(client, test_project):
 
     text = await facts_text(kind="lesson", project=test_project.name)
 
-    assert text.startswith("2 lesson notes on page 1:")
+    assert text.startswith("2 lesson notes shown (page 1, total unknown):")
     assert "Retry on 429 | status active | last_verified 2026-11-14 | confidence high" in text
     assert "Bare lesson | status active" in text
     assert "Use SQLite" not in text
@@ -81,7 +82,9 @@ async def test_repo_and_status_narrow_the_listing(client, test_project):
 
     assert "Mine draft" in drafts
     assert "Mine open" not in drafts
-    assert drafts.startswith("1 bug notes with repo 'demo-repo' and status 'draft' on page 1:")
+    assert drafts.startswith(
+        "1 bug notes shown with repo 'demo-repo' and status 'draft' (page 1, total unknown):"
+    )
     assert "Other repo" not in in_repo
     assert "Mine open" in in_repo
     assert "Mine draft" in in_repo
@@ -233,12 +236,24 @@ async def test_empty_result_in_an_unindexed_project_says_so(
         {"kind": "fact", "page_size": 101},
         {"kind": "fact", "repo": ""},
         {"kind": "fact", "status": ""},
+        {"kind": "fact", "status": "actve"},
     ],
 )
 async def test_arguments_are_validated(client, test_project, arguments):
     call: Any = validate_call(bm_facts)
     with pytest.raises(ValidationError):
         await call(project=test_project.name, **arguments)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", FACT_STATUSES)
+async def test_every_lifecycle_status_is_accepted(client, test_project, status):
+    await write_record(test_project.name, kind="fact", title="A fact", status=status)
+    call: Any = validate_call(bm_facts)
+
+    text = await call(kind="fact", status=status, project=test_project.name, context=None)
+
+    assert f"status '{status}'" in text and "A fact" in text
 
 
 @pytest.mark.asyncio

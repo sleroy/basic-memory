@@ -1,5 +1,6 @@
 """Pack composition: selection, ranking and the token budget, over plain values."""
 
+import ast
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -10,7 +11,9 @@ from basic_memory.mcp.pack_composition import (
     CODE_POINTER_LABEL,
     EMPTY_SECTION,
     HYGIENE_LABEL,
+    KIND_HEADINGS,
     MAX_BUDGET_TOKENS,
+    OVER_BUDGET_NOTE,
     PACK_ORDER,
     POLICY_LABEL,
     RECALLED_LABEL,
@@ -27,6 +30,7 @@ from basic_memory.mcp.pack_composition import (
 )
 
 NOW = datetime(2026, 11, 14, 12, 30, 5, tzinfo=timezone.utc)
+FULL_LIST = " (full list; includes notes shown above)"
 
 
 def record(**overrides: object) -> MemoryRecord:
@@ -267,7 +271,8 @@ def test_pack_sections_come_in_the_fixed_order_with_their_labels():
     assert "- AGENTS.md#1 (1 notes)" in text
     assert "Decisions:\n- D [unverified; confidence n/a]" in text
     assert "EPISODIC:\n- Session one" in text
-    assert "- 2 drafts awaiting review (bm_facts(" in text
+    assert '- 2 drafts awaiting review (one bm_facts call per kind, with status="draft"' in text
+    assert "<kind>" not in text
     assert (
         "- 3 active notes not verified in 90 days (last_verified absent or before 2026-08-16)"
         in text
@@ -299,8 +304,11 @@ def test_budget_cuts_a_section_and_every_later_one_stops_at_its_continuation():
     shown = [block for block in pack.recalled if block.name == "lesson"][0].lines
     assert 0 < len(shown) < 40
     assert shown == tuple(item_line(lesson) for lesson in lessons[: len(shown)])
-    assert text.count('… continue with bm_facts(kind="lesson", project="proj", repo="demo")') == 1
-    assert 'Facts:\n… continue with bm_facts(kind="fact", project="proj", repo="demo")' in text
+    assert text.count('… continue with bm_facts(kind="lesson", status="active"') == 1
+    assert (
+        'Facts:\n… continue with bm_facts(kind="fact", status="active", project="proj", '
+        f'repo="demo"){FULL_LIST}'
+    ) in text
     assert "Late fact" not in text
     # Sections with nothing to show stay out.
     assert "Decisions:" not in text
@@ -331,7 +339,11 @@ def test_the_widening_call_never_exceeds_the_maximum_budget():
         data({"decision": [record(kind="decision", authorities=authorities)]}),
     )
 
-    assert f"budget_tokens={MAX_BUDGET_TOKENS})" in pack.to_text()
+    text = pack.to_text()
+    # There is nothing larger to ask for: the pointer is to the notes themselves.
+    assert "budget_tokens=" not in text
+    assert "budget_tokens is at its maximum" in text
+    assert 'bm_facts call per kind, e.g. bm_facts(kind="decision", status="active"' in text
     assert pack.tokens_used <= MAX_BUDGET_TOKENS
 
 
@@ -356,18 +368,24 @@ def test_a_kind_with_more_notes_upstream_ends_with_its_continuation_without_bloc
 def test_a_kind_with_notes_only_upstream_shows_its_heading_and_continuation():
     text = compose_pack(request(), data(upstream=("lesson",))).to_text()
 
-    assert 'Lessons:\n… continue with bm_facts(kind="lesson", project="proj", repo="demo")' in text
+    assert (
+        'Lessons:\n… continue with bm_facts(kind="lesson", status="active", project="proj", '
+        f'repo="demo"){FULL_LIST}'
+    ) in text
 
 
 def test_the_last_line_of_a_section_needs_no_room_for_a_continuation():
     facts = [record(external_id=f"f{n}", title=f"Fact {n}") for n in range(60)]
-    continuation = '… continue with bm_facts(kind="fact", project="proj", repo="demo")'
+    continuation = (
+        '… continue with bm_facts(kind="fact", status="active", project="proj", repo="demo")'
+        + FULL_LIST
+    )
 
     def pack_at(budget: int):
         return compose_pack(request(budget_tokens=budget), data({"fact": facts}))
 
     smallest = next(
-        budget for budget in range(100, 5000) if continuation not in pack_at(budget).to_text()
+        budget for budget in range(100, 5000) if pack_at(budget).to_text().count("- Fact ") == 60
     )
 
     tight = pack_at(smallest)
@@ -410,3 +428,135 @@ def test_json_pack_has_the_same_parts_as_the_text():
         "stale_before": "2026-08-16",
     }
     assert compose_pack(request(), data()).to_json()["code_pointer"] is None
+
+
+# --- The budget is a ceiling ---
+
+
+def notes_of_every_kind(count: int = 40) -> dict[str, list[MemoryRecord]]:
+    return {
+        kind: [
+            record(kind=kind, external_id=f"{kind}-{n}", title=f"{kind} {n}", summary="x" * 150)
+            for n in range(count)
+        ]
+        for kind in PACK_ORDER
+    }
+
+
+def test_long_names_never_push_the_pack_past_the_budget():
+    # Both names recur in every continuation line; before the fix this overran 500.
+    pack = compose_pack(
+        request(project="p" * 76, repo="r" * 61, budget_tokens=500),
+        data(notes_of_every_kind(), upstream=PACK_ORDER, sessions=("Session",)),
+    )
+
+    lines = pack.to_text().split("\n")
+
+    assert pack.tokens_used <= 500
+    assert sum(estimate_tokens(line + "\n") for line in lines) <= 500
+    # A heading is never left bare: a note line or a continuation follows it.
+    headings = [index for index, line in enumerate(lines) if line in KIND_HEADINGS.values()]
+    assert headings
+    assert all(lines[index + 1].startswith(("- ", "… continue with")) for index in headings)
+    # Later groups did not fit and were left out whole.
+    assert len(headings) < len(PACK_ORDER)
+
+
+def test_names_longer_than_the_budget_say_so_in_the_header_and_show_no_section():
+    pack = compose_pack(
+        request(repo="r" * 2500, budget_tokens=500),
+        data({"lesson": [record(kind="lesson", title="A lesson")]}, sessions=("Session",)),
+    )
+
+    text = pack.to_text()
+
+    assert pack.tokens_used > 500
+    header = text.splitlines()[0]
+    assert f"tokens: {pack.tokens_used}/500" in header
+    assert header.endswith(f"| over budget: {OVER_BUDGET_NOTE}")
+    assert "A lesson" not in text and "Session" not in text
+    assert text.count(EMPTY_SECTION) == 3
+    assert pack.to_json()["tokens_used"] == pack.tokens_used
+
+
+# --- Continuations carry the pack's scope ---
+
+
+def continuation_call(continuation: str | None) -> tuple[str, dict[str, object], str]:
+    """The tool call a continuation line names, its arguments, and the trailing note."""
+    assert continuation is not None
+    call, split, note = continuation.removeprefix("… continue with ").partition(") (")
+    node = ast.parse(call + (")" if split else ""), mode="eval").body
+    assert isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    arguments = {kw.arg: ast.literal_eval(kw.value) for kw in node.keywords if kw.arg}
+    return node.func.id, arguments, note.removesuffix(")")
+
+
+def kind_continuations(**overrides: object) -> dict[str, str | None]:
+    pack = compose_pack(request(**overrides), data(upstream=PACK_ORDER))
+    return {block.name: block.continuation for block in pack.recalled}
+
+
+def test_a_kind_continuation_lists_only_active_notes_and_says_it_repeats_the_shown_ones():
+    continuations = kind_continuations()
+
+    for kind in PACK_ORDER:
+        if kind == "bug":
+            continue
+        tool, arguments, note = continuation_call(continuations[kind])
+        assert tool == "bm_facts"
+        assert arguments == {
+            "kind": kind,
+            "status": "active",
+            "project": "proj",
+            "repo": "demo",
+        }
+        assert note == "full list; includes notes shown above"
+
+
+def test_the_bug_continuation_lists_active_and_fixed_notes_through_a_filter():
+    tool, arguments, _ = continuation_call(kind_continuations()["bug"])
+
+    assert tool == "bm_facts"
+    # `status=` takes one value, so two statuses go through `filters`; the call must
+    # not also set `status`, which bm_facts refuses alongside a `status` filter.
+    assert arguments == {
+        "kind": "bug",
+        "filters": {"status": {"$in": ["active", "fixed"]}},
+        "project": "proj",
+        "repo": "demo",
+    }
+
+
+def test_a_pack_built_for_a_branch_tells_the_reader_which_notes_to_skip():
+    continuations = kind_continuations(branch="feat/x")
+
+    for continuation in continuations.values():
+        _, arguments, note = continuation_call(continuation)
+        assert "branch" not in arguments
+        assert note.endswith('; skip valid_for.branch other than "feat/x"')
+
+
+def test_the_widening_call_carries_the_arguments_that_shaped_the_pack():
+    authorities = tuple(f"docs/rule-{n:03d}.md" for n in range(200))
+    pack = compose_pack(
+        request(
+            budget_tokens=500,
+            branch="dev",
+            task="fix retry logic",
+            affected_paths=("src/a", "src/b"),
+        ),
+        data({"decision": [record(kind="decision", authorities=authorities)]}),
+    )
+
+    tool, arguments, _ = continuation_call(pack.policy.continuation)
+
+    assert tool == "bm_project_context"
+    assert arguments == {
+        "project": "proj",
+        "repo": "demo",
+        "branch": "dev",
+        "task": "fix retry logic",
+        "affected_paths": ["src/a", "src/b"],
+        "budget_tokens": 1000,
+    }

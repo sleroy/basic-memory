@@ -55,10 +55,28 @@ whose `applies_to` covers a path, by whole path segments. `branch` drops notes w
 `valid_for.branch` names another branch; notes without it hold on every branch.
 
 The pack is filled in that order until `budget_tokens` runs out. A section that was
-cut, and every section after it, ends with the exact call that fetches the rest, such
-as `… continue with bm_facts(kind="lesson", project="memory", repo="monolith-breaker")`.
+cut, and every section after it, ends with a call that fetches the full list of this
+kind, such as `… continue with bm_facts(kind="lesson", status="active",
+project="memory", repo="monolith-breaker") (full list; includes notes shown above)`.
+That call starts at the first note, so it repeats the notes the pack showed. It
+returns active notes only (for bugs, active and fixed). `bm_facts` has no branch
+filter, so a pack built with `branch` also says which notes to skip. A cut policy
+section suggests the same `bm_project_context` call with a larger `budget_tokens`,
+carrying `branch`, `task` and `affected_paths`; at the maximum budget it points at
+`bm_facts` instead. The pack never exceeds `budget_tokens`: a section whose heading
+and continuation no longer fit is left out. Only when the repo and project names are
+so long that the header and hygiene lines alone exceed the budget, the header says
+so and no section is shown.
 The pack reads the 50 most recently edited notes of each kind. The shell
 counterpart is `bm tool project-context`, which prints the same plain text.
+
+Cost: one call runs seven searches (one per kind, plus the sessions), or nine with
+`task` (a second search each for lessons and bugs). It reads the accepted Markdown of
+every note those searches return, up to 300 notes, or 400 with `task`. It also makes
+three exact count scans (drafts, stale by date, stale by missing date). Each scan
+pages through every matching note, 100 rows per request, so the cost of the hygiene
+counts grows with the number of notes for the repo. The counts stay exact; they are
+not estimated or capped.
 
 ## PARAMETERS
 
@@ -85,7 +103,7 @@ bm_project_context(repo="monolith-breaker", branch="dev", project="memory")
 #   - Run the slice before pushing: Run `make slice` first. (verify: make slice) [last_verified 2026-01-18; confidence medium] (memory/lessons/Run the slice before pushing.md)
 #   ...
 #   HYGIENE:
-#   - 1 drafts awaiting review (bm_facts(kind="<kind>", status="draft", project="memory", repo="monolith-breaker"))
+#   - 1 drafts awaiting review (one bm_facts call per kind, with status="draft", project="memory", repo="monolith-breaker")
 #   - 2 active notes not verified in 90 days (last_verified absent or before 2026-08-16)
 ```
 

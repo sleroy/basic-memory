@@ -27,7 +27,8 @@ bm_facts(kind, project, repo=None, status=None, filters=None, page=1,
 Lists the project's knowledge notes of one `kind`: fact, bug, lesson,
 best_practice, decision or glossary_term. The kind is the note's frontmatter
 `type`. `repo` limits the list to notes about one code repository (frontmatter
-`repo`). `status` limits it to one lifecycle status; omit it to list every status,
+`repo`). `status` limits it to one lifecycle status (draft, active, fixed, superseded,
+invalidated or promoted; any other value is refused); omit it to list every status,
 and pass `"draft"` to list notes awaiting review. `filters` adds frontmatter
 conditions.
 
@@ -54,7 +55,7 @@ free-text search use bm_search.
 
 ```
 bm_facts(kind="lesson", repo="monolith-breaker", project="memory")
-# → 2 lesson notes with repo 'monolith-breaker' on page 1:
+# → 2 lesson notes shown with repo 'monolith-breaker' (page 1, total unknown):
 #
 #   - memory/lessons/Retry on 429.md | Retry on 429 | status active | last_verified 2026-11-14 | confidence high
 #   - memory/lessons/Run the slice first.md | Run the slice first | status active

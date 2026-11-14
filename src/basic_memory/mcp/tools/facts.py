@@ -12,7 +12,13 @@ from fastmcp import Context
 from pydantic import Field
 
 from basic_memory.mcp.index_readiness import project_index_required
-from basic_memory.mcp.memory_records import FactKind, MemoryRecord, fetch_records
+from basic_memory.mcp.memory_records import (
+    FACT_STATUSES,
+    FactKind,
+    FactStatus,
+    MemoryRecord,
+    fetch_records,
+)
 from basic_memory.mcp.note_targets import open_project_target
 from basic_memory.mcp.refusals import refusal
 from basic_memory.mcp.server import mcp
@@ -58,11 +64,12 @@ async def bm_facts(
         Field(min_length=1, description="Only notes about this code repository (`repo:`)."),
     ] = None,
     status: Annotated[
-        str | None,
+        FactStatus | None,
         Field(
-            min_length=1,
-            description="Only notes with this status: draft, active, fixed, superseded, "
-            "invalidated or promoted. Omit for all.",
+            description=(
+                f"Only notes with this status: {', '.join(FACT_STATUSES[:-1])} "
+                f"or {FACT_STATUSES[-1]}. Omit for all."
+            ),
         ),
     ] = None,
     filters: Filters = None,
@@ -151,7 +158,7 @@ def _format_records(
     """One line per note: path, title, status, then last_verified and confidence if set."""
     if not records:
         return f"No {kind} notes{scope}."
-    lines = [f"{len(records)} {kind} notes{scope} on page {page}:", ""]
+    lines = [f"{len(records)} {kind} notes shown{scope} (page {page}, total unknown):", ""]
     for record in records:
         line = f"- {record.file_path} | {record.title} | status {record.status or 'none'}"
         if record.last_verified is not None:

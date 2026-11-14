@@ -18,7 +18,8 @@ from basic_memory.mcp.pack_composition import (
     POLICY_LABEL,
     RECALLED_LABEL,
 )
-from basic_memory.mcp.tools import bm_project_context, bm_search, bm_write
+from basic_memory.mcp.tools import bm_facts, bm_project_context, bm_search, bm_write
+from tests.mcp.test_pack_composition import continuation_call
 from tests.mcp.test_tool_bm_facts import REPO, write_record
 
 TODAY = date.today()
@@ -307,8 +308,8 @@ async def test_hygiene_counts_drafts_and_unverified_active_notes(client, test_pr
 
     hygiene = text.split(HYGIENE_LABEL)[1]
     assert (
-        '- 2 drafts awaiting review (bm_facts(kind="<kind>", status="draft", '
-        f'project="{test_project.name}", repo="demo-repo"))'
+        '- 2 drafts awaiting review (one bm_facts call per kind, with status="draft", '
+        f'project="{test_project.name}", repo="demo-repo")'
     ) in hygiene
     cutoff = (TODAY - timedelta(days=90)).isoformat()
     assert (
@@ -337,13 +338,20 @@ async def test_budget_truncation_ends_each_cut_section_with_a_continuation(clien
     assert payload["tokens_used"] <= 500
     assert re.search(r"tokens: \d+/500 ", text.splitlines()[0])
     assert (
-        f'… continue with bm_facts(kind="lesson", project="{test_project.name}", repo="demo-repo")'
+        f'… continue with bm_facts(kind="lesson", status="active", '
+        f'project="{test_project.name}", repo="demo-repo") (full list; includes notes shown above)'
     ) in text
-    assert "Lesson number 29" not in text or "Lesson number 00" not in text
+    # Search order is most recently edited first, so the pack keeps a prefix of that
+    # order: the newest lessons (29, 28, ...) and none of the oldest.
+    shown = [int(number) for number in re.findall(r"^- Lesson number (\d\d)", text, re.M)]
+    assert 0 < len(shown) < 30
+    assert shown == list(range(29, 29 - len(shown), -1))
+    assert "Lesson number 00" not in text
     # The pack is a prefix of the priority order: once lessons are cut, a fact that
     # would have fit is held back, and its section says how to get it.
     assert (
-        f'… continue with bm_facts(kind="fact", project="{test_project.name}", repo="demo-repo")'
+        f'… continue with bm_facts(kind="fact", status="active", '
+        f'project="{test_project.name}", repo="demo-repo") (full list; includes notes shown above)'
     ) in text
     assert "Late fact" not in text
     assert payload["recalled_knowledge"]["fact"]["lines"] == []
@@ -372,7 +380,8 @@ async def test_a_kind_with_more_notes_than_the_pack_reads_ends_with_a_continuati
 
     assert text.count("- Fact ") == 2
     assert (
-        f'… continue with bm_facts(kind="fact", project="{test_project.name}", repo="demo-repo")'
+        f'… continue with bm_facts(kind="fact", status="active", '
+        f'project="{test_project.name}", repo="demo-repo") (full list; includes notes shown above)'
     ) in text
 
 
@@ -520,3 +529,40 @@ async def test_observations_past_the_search_snippet_cap_still_reach_the_pack(cli
     assert hit["content_length"] > 100_000
     assert "Found at the very end" not in hit["content"]
     assert "- Very long lesson: Read the whole note. (verify: make verify) [" in text
+
+
+@pytest.mark.asyncio
+async def test_following_a_continuation_lists_the_pack_statuses_and_nothing_else(
+    client, test_project
+):
+    project = test_project.name
+    for index in range(25):
+        await write_record(
+            project,
+            kind="bug",
+            title=f"Open bug {index:02d}",
+            body=f"# Open bug {index:02d}\n\n- [summary] {'It breaks in a long way. ' * 6}",
+        )
+    await write_record(project, kind="bug", title="Fixed bug", status="fixed")
+    for index in range(5):
+        await write_record(project, kind="lesson", title=f"Active lesson {index}")
+    for status in ("draft", "superseded", "invalidated"):
+        await write_record(project, kind="lesson", title=f"Lesson {status}", status=status)
+        await write_record(project, kind="bug", title=f"Bug {status}", status=status)
+
+    payload = await pack_json(repo=REPO, budget_tokens=500, project=project)
+
+    facts: Any = bm_facts
+    listed: dict[str, set[str]] = {}
+    for kind in ("bug", "lesson"):
+        tool, arguments, _ = continuation_call(payload["recalled_knowledge"][kind]["continuation"])
+        assert tool == "bm_facts"
+        result = await facts(**arguments, page_size=100, output_format="json")
+        assert isinstance(result, dict) and not result["has_more"]
+        listed[kind] = {row["title"] for row in result["results"]}
+        assert {row["status"] for row in result["results"]} <= {"active", "fixed"}
+
+    assert listed["lesson"] == {f"Active lesson {index}" for index in range(5)}
+    # The bug call reaches every open bug (the pack showed only a prefix of them) and
+    # the fixed one, but no draft, superseded or invalidated bug.
+    assert {f"Open bug {index:02d}" for index in range(25)} | {"Fixed bug"} == listed["bug"]

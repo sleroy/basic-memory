@@ -151,3 +151,23 @@ async def test_count_notes_counts_rows_across_pages(
 
     assert in_repo == 5
     assert nothing == 0
+
+
+@pytest.mark.parametrize("branch", ["[dev, main]", "{name: dev}"])
+def test_a_valid_for_branch_that_is_not_one_name_is_refused(branch: str):
+    note = f"---\nstatus: active\nvalid_for:\n  branch: {branch}\n---\n\nbody"
+
+    with pytest.raises(ToolError) as refused:
+        parse_record("fact", hit(), note, PATHS)
+
+    message = str(refused.value)
+    assert "lessons/Retry on 429.md" in message
+    assert "`valid_for.branch` must be one branch name" in message
+
+
+def test_valid_for_without_a_branch_holds_on_every_branch():
+    assert (
+        parse_record("fact", hit(), "---\nvalid_for:\n  until: 2027\n---\n\nb", PATHS).branch
+        is None
+    )
+    assert parse_record("fact", hit(), "---\nvalid_for: main\n---\n\nb", PATHS).branch is None

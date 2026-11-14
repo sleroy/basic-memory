@@ -27,6 +27,12 @@ type FactKind = Literal["fact", "bug", "lesson", "best_practice", "decision", "g
 
 FACT_KINDS: tuple[str, ...] = get_args(FactKind.__value__)
 
+# The lifecycle states a knowledge note moves through (schema v2). The one list that
+# `bm_facts` validates against, the pack selects from and the manual describes.
+type FactStatus = Literal["draft", "active", "fixed", "superseded", "invalidated", "promoted"]
+
+FACT_STATUSES: tuple[str, ...] = get_args(FactStatus.__value__)
+
 # The index orders rows of equal score by `updated_at`, newest first, only when the
 # query carries an `after_date`. Filter-only searches score every row zero, so this
 # earliest-possible date turns "any order" into "most recently edited first" without
@@ -101,6 +107,21 @@ def _texts(value: Any) -> tuple[str, ...]:
     return (str(value),)
 
 
+def _branch(valid_for: Any, file_path: str) -> str | None:
+    """`valid_for.branch`: one branch name, or None when the note holds on every branch."""
+    if not isinstance(valid_for, dict):
+        return None
+    branch = valid_for.get("branch")
+    # A list would read as one odd name that matches no branch, silently hiding the
+    # note from every branch-scoped pack. Refuse it so the note gets fixed.
+    if isinstance(branch, (list, dict)):
+        raise ToolError(
+            f"{file_path}: `valid_for.branch` must be one branch name, not a "
+            f"{type(branch).__name__}. Edit the note to name a single branch, or drop it."
+        )
+    return _text(branch)
+
+
 def _observations(body: str) -> dict[str, str]:
     """The first observation of each category in a note body."""
     found: dict[str, str] = {}
@@ -137,7 +158,6 @@ def parse_record(
     if content is not None:
         body = remove_frontmatter(content) if has_frontmatter(content) else content
     observations = _observations(body)
-    valid_for = frontmatter.get("valid_for")
     return MemoryRecord(
         kind=kind,
         title=hit.title,
@@ -148,7 +168,7 @@ def parse_record(
         repo=_text(frontmatter.get("repo")),
         authorities=_texts(frontmatter.get("authorities")),
         applies_to=_texts(frontmatter.get("applies_to")),
-        branch=_text(valid_for.get("branch")) if isinstance(valid_for, dict) else None,
+        branch=_branch(frontmatter.get("valid_for"), hit.file_path),
         last_verified=_text(frontmatter.get("last_verified")),
         confidence=_text(frontmatter.get("confidence")),
         summary=observations.get("summary") or _first_body_line(body),
@@ -240,7 +260,7 @@ async def fetch_records(
     paths = target.paths
     return RecordPage(
         records=tuple(
-            parse_record(kind, hit, contents.get(hit.external_id or ""), paths)
+            parse_record(kind, hit, contents.get(hit.external_id), paths)
             for hit in response.results
         ),
         pagination=Pagination(

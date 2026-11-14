@@ -134,7 +134,8 @@ async def test_pack_truncates_to_a_small_budget_and_points_at_the_rest(
         )
 
     assert (
-        f'… continue with bm_facts(kind="lesson", project="{test_project.name}", repo="{REPO}")'
+        f'… continue with bm_facts(kind="lesson", status="active", '
+        f'project="{test_project.name}", repo="{REPO}") (full list; includes notes shown above)'
     ) in text
     assert text.count("- Lesson ") < 25
 

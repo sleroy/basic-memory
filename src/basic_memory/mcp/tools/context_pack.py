@@ -84,14 +84,19 @@ async def bm_project_context(
         list[str] | None,
         BeforeValidator(coerce_list),
         Field(
-            description="Repository paths the work touches; notes whose `applies_to` covers them rank first."
+            description=(
+                "Repository paths the work touches; notes whose `applies_to` covers them "
+                "rank first."
+            )
         ),
     ] = None,
     branch: Annotated[
         str | None,
         Field(
             min_length=1,
-            description="Current branch; notes limited to another branch (`valid_for.branch`) are left out.",
+            description=(
+                "Current branch; notes limited to another branch (`valid_for.branch`) are left out."
+            ),
         ),
     ] = None,
     budget_tokens: Annotated[
@@ -99,7 +104,10 @@ async def bm_project_context(
         Field(
             ge=500,
             le=MAX_BUDGET_TOKENS,
-            description="Approximate size of the pack in tokens (500-20000), estimated at 4 characters each.",
+            description=(
+                "Approximate size of the pack in tokens (500-20000), estimated at 4 "
+                "characters each."
+            ),
         ),
     ] = 4000,
     recheck_days: Annotated[
@@ -120,6 +128,7 @@ async def bm_project_context(
         budget_tokens=budget_tokens,
         recheck_days=recheck_days,
         generated_at=datetime.now(timezone.utc),
+        task=task,
     )
     async with open_project_target("", project, context, output_format=output_format) as target:
         data = await _gather(target, request, task)
