@@ -7,8 +7,10 @@ all tools with the MCP server.
 
 # 1.0 tool surface (SPEC-35.2, #1827).
 from basic_memory.mcp.tools.context import bm_context
+from basic_memory.mcp.tools.context_pack import bm_project_context
 from basic_memory.mcp.tools.delete import bm_delete
 from basic_memory.mcp.tools.edit import bm_edit
+from basic_memory.mcp.tools.facts import bm_facts
 from basic_memory.mcp.tools.find_files import bm_find
 from basic_memory.mcp.tools.listing import bm_list
 from basic_memory.mcp.tools.manual import bm_man
@@ -33,11 +35,13 @@ __all__ = [
     "bm_context",
     "bm_delete",
     "bm_edit",
+    "bm_facts",
     "bm_find",
     "bm_list",
     "bm_man",
     "bm_move",
     "bm_project_create",
+    "bm_project_context",
     "bm_project_delete",
     "bm_project_list",
     "bm_read",

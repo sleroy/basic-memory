@@ -81,6 +81,26 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     "bm_project_create": ["name", "path", "set_default", "workspace", "output_format"],
     "bm_recent": ["project", "since", "items", "page", "page_size", "output_format"],
     "bm_project_delete": ["name", "delete_notes", "workspace", "output_format"],
+    "bm_facts": [
+        "kind",
+        "repo",
+        "status",
+        "filters",
+        "page",
+        "page_size",
+        "output_format",
+        "project",
+    ],
+    "bm_project_context": [
+        "repo",
+        "task",
+        "affected_paths",
+        "branch",
+        "budget_tokens",
+        "recheck_days",
+        "output_format",
+        "project",
+    ],
     "bm_man": ["page", "query", "output_format"],
     "bm_schema_validate": ["note_type", "identifier", "output_format", "project"],
     "bm_schema_infer": ["note_type", "threshold", "output_format", "project"],
@@ -145,6 +165,8 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "bm_schema_infer": {"readOnlyHint": True, "destructiveHint": False},
     "bm_schema_diff": {"readOnlyHint": True, "destructiveHint": False},
     "bm_man": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_facts": {"readOnlyHint": True, "destructiveHint": False},
+    "bm_project_context": {"readOnlyHint": True, "destructiveHint": False},
 }
 
 OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
@@ -181,6 +203,8 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "bm_schema_infer": tools.bm_schema_infer,
     "bm_schema_diff": tools.bm_schema_diff,
     "bm_man": tools.bm_man,
+    "bm_facts": tools.bm_facts,
+    "bm_project_context": tools.bm_project_context,
 }
 
 
