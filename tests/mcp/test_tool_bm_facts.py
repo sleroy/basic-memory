@@ -61,13 +61,18 @@ async def test_lists_one_kind_with_lifecycle_fields(client, test_project):
         confidence="high",
     )
     await write_record(test_project.name, kind="lesson", title="Bare lesson")
+    await write_record(
+        test_project.name, kind="lesson", title="Dev only", valid_for={"branch": "dev"}
+    )
     await write_record(test_project.name, kind="decision", title="Use SQLite")
 
     text = await facts_text(kind="lesson", project=test_project.name)
 
-    assert text.startswith("2 lesson notes shown (page 1, total unknown):")
+    assert text.startswith("3 lesson notes shown (page 1, total unknown):")
     assert "Retry on 429 | status active | last_verified 2026-11-14 | confidence high" in text
     assert "Bare lesson | status active" in text
+    assert "Dev only | status active | branch dev" in text
+    assert text.count("| branch") == 1
     assert "Use SQLite" not in text
 
 

@@ -155,7 +155,7 @@ def _format_records(
     scope: str,
     next_call: str | None,
 ) -> str:
-    """One line per note: path, title, status, then last_verified and confidence if set."""
+    """One line per note: path, title, status, then last_verified, confidence and branch if set."""
     if not records:
         return f"No {kind} notes{scope}."
     lines = [f"{len(records)} {kind} notes shown{scope} (page {page}, total unknown):", ""]
@@ -165,6 +165,8 @@ def _format_records(
             line += f" | last_verified {record.last_verified}"
         if record.confidence is not None:
             line += f" | confidence {record.confidence}"
+        if record.branch is not None:
+            line += f" | branch {record.branch}"
         lines.append(line)
     if next_call is not None:
         lines.extend(["", f"More results available. Call {next_call} to continue."])

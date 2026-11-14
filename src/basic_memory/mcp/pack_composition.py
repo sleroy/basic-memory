@@ -379,8 +379,8 @@ def _fill(groups: Sequence[_Group], available: int) -> list[Block]:
         # Trigger: not even the heading and continuation fit in what is left.
         # Why: earlier groups' long lines (or long names repeated in every
         #      continuation) can use the budget up; emitting anyway overruns it.
-        # Outcome: the group stays empty and is not rendered; later groups cannot fit
-        #          either, so they are left out the same way.
+        # Outcome: the group stays empty and is not rendered. Later groups are still
+        #          tried, since a shorter heading and continuation may fit the remainder.
         if spent > remaining:
             exhausted = True
             continue

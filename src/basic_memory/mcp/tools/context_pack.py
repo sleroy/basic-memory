@@ -24,6 +24,7 @@ from basic_memory.mcp.note_targets import ProjectTarget, open_project_target
 from basic_memory.mcp.pack_composition import (
     MAX_BUDGET_TOKENS,
     PACK_ORDER,
+    RENDERABLE_STATUSES,
     KindNotes,
     PackData,
     PackRequest,
@@ -131,7 +132,7 @@ async def bm_project_context(
         task=task,
     )
     async with open_project_target("", project, context, output_format=output_format) as target:
-        data = await _gather(target, request, task)
+        data = await _gather(target, request)
         # An empty pack is a trustworthy miss only after the project has been indexed.
         if not (any(notes.records for notes in data.kinds) or data.session_titles or data.drafts):
             guidance = await project_index_required(target.client, target.project)
@@ -163,14 +164,14 @@ def _unique(records: list[MemoryRecord]) -> list[MemoryRecord]:
     return list({record.external_id: record for record in records}.values())
 
 
-async def _gather(target: ProjectTarget, request: PackRequest, task: str | None) -> PackData:
+async def _gather(target: ProjectTarget, request: PackRequest) -> PackData:
     """Run the searches the pack is made of, one kind at a time."""
-    task_query = _task_query(task)
+    task_query = _task_query(request.task)
     kinds: list[KindNotes] = []
     for kind in PACK_ORDER:
         # A fixed bug is shown only when the task or paths point at it, which the
         # selection decides; the search returns both so it can.
-        status = {"$in": ["active", "fixed"]} if kind == "bug" else "active"
+        status = {"$in": sorted(RENDERABLE_STATUSES)} if kind == "bug" else "active"
         filters = {"repo": request.repo, "status": status}
         latest = await fetch_records(
             target, kind=kind, metadata_filters=filters, page_size=NOTES_PER_KIND
